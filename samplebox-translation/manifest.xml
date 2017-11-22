@@ -1,0 +1,65 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<package version="0.0.0" uuid="samplebox-translation-4c1363">
+ <names>
+  <name lang="en_US">samplebox-translation</name>
+ </names>
+ <supportedLanguages>
+  <language>ar_SA</language>
+  <language>cs_CZ</language>
+  <language>da_DK</language>
+  <language>de_DE</language>
+  <language>el_GR</language>
+  <language>en_US</language>
+  <language>es_ES</language>
+  <language>fi_FI</language>
+  <language>fr_FR</language>
+  <language>it_IT</language>
+  <language>ja_JP</language>
+  <language>ko_KR</language>
+  <language>nl_NL</language>
+  <language>nn_NO</language>
+  <language>pl_PL</language>
+  <language>pt_BR</language>
+  <language>pt_PT</language>
+  <language>ru_RU</language>
+  <language>sv_SE</language>
+  <language>tr_TR</language>
+  <language>zh_CN</language>
+  <language>zh_TW</language>
+ </supportedLanguages>
+ <descriptionLanguages>
+  <language>en_US</language>
+  <language>ar_SA</language>
+  <language>cs_CZ</language>
+  <language>da_DK</language>
+  <language>de_DE</language>
+  <language>el_GR</language>
+  <language>es_ES</language>
+  <language>fi_FI</language>
+  <language>fr_FR</language>
+  <language>it_IT</language>
+  <language>ja_JP</language>
+  <language>ko_KR</language>
+  <language>nl_NL</language>
+  <language>nn_NO</language>
+  <language>pl_PL</language>
+  <language>pt_BR</language>
+  <language>pt_PT</language>
+  <language>ru_RU</language>
+  <language>sv_SE</language>
+  <language>tr_TR</language>
+  <language>zh_CN</language>
+  <language>zh_TW</language>
+ </descriptionLanguages>
+ <contents>
+  <behaviorContent path="behavior_1">
+   <userRequestable/>
+   <nature>interactive</nature>
+   <permissions/>
+  </behaviorContent>
+ </contents>
+ <requirements>
+  <naoqiRequirement minVersion="2.5" maxVersion="2"/>
+  <robotRequirement model="JULIETTE_Y20"/>
+ </requirements>
+</package>

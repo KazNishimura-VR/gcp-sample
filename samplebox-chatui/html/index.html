@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1280, user-scalable=no" />
+  <!-- HTML5 Animation -->
+  <link href="css/magic.css" rel="stylesheet" type="text/css">
+  <!-- Chat UI -->
+  <link href="css/chatui.css" rel="stylesheet" type="text/css">
+  <link href="css/chatui.dialog.css" rel="stylesheet" type="text/css">
+  <link href="css/animate.css" rel="stylesheet" type="text/css">
+  <!-- NAOqi Qimessaging -->
+  <script src="/libs/qimessaging/2/qimessaging.js"></script>
+  <script src="js/jquery-1.11.0.min.js"></script>
+  <!-- Chat UI -->
+  <script src="js/chatui.js"></script>
+</head>
+
+<body>
+  <!-- モード表示 -->
+  <div class="disp-mode">Chat.UI</div>
+  <!-- /モード表示 -->
+  <!-- 利用方法ダイアログ -->
+  <div class="dialog" id="usage-dialog">
+    <div class="dialog-header">
+      <span class="dialog-title">つかいかた</span>
+    </div>
+    <div class="dialog-content">
+      <p>ここにテキストを書いてね</p>
+      <button type="button" class="dialog-close">わかった</button>
+    </div>
+  </div>
+  <!-- /利用方法ダイアログ -->
+  <div id="bg"></div>
+  <div id="chat-frame">
+    <!-- テスト用コード -->
+    <!--
+    <p class="chat-talk">
+      <span class="talk-icon"><img src="img/icon_pepper.png" alt="pepper"/></span>
+      <span class="talk-content-container">
+        <span class="talk-content">[トーク内容を記載]</span>
+      </span>
+    </p>
+    <p class="chat-talk mytalk">
+      <span class="talk-icon"><img src="img/icon_user.png" alt="pepper"/></span>
+      <span class="talk-content-container">
+        <span class="talk-content">[トーク内容を記載]</span>
+      </span>
+    </p>
+    <p class="chat-talk">
+      <span class="talk-content">
+        <span class="info-content">［メッセージ］</span>
+      </span>
+    </p>
+    -->
+    <!-- 選択肢 -->
+    <!-- <div class="select-frame">
+      <ul class="select-frame-inner">
+        <li>でりしゃす</li>
+        <li>酒</li>
+        <li>肉</li>
+        <li>美味しそう</li>
+      </ul>
+    </div> -->
+  </div>
+  <div id="chat-frame-end"></div>
+</body>
+
+</html>

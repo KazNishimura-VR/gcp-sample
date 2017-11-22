@@ -1,0 +1,29 @@
+item {
+  id: 1
+  name: 'wasabi_snack'
+}
+
+item {
+  id: 2
+  name: 'cream_collon'
+}
+
+item {
+  id: 3
+  name: 'komugi_bisuco'
+}
+
+item {
+  id: 4
+  name: 'cream_bisuco'
+}
+
+item {
+  id: 5
+  name: 'butter_bisuco'
+}
+
+item {
+  id: 6
+  name: 'cheese_cake'
+}

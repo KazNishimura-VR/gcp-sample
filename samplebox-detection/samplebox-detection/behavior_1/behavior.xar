@@ -1,0 +1,645 @@
+<?xml version="1.0" encoding="UTF-8" ?><ChoregrapheProject xmlns="http://www.aldebaran-robotics.com/schema/choregraphe/project.xsd" xar_version="3"><Box name="root" id="-1" localization="8" tooltip="Root box of Choregraphe&apos;s behavior. Highest level possible." x="0" y="0"><bitmap>media/images/box/root.png</bitmap><script language="4"><content><![CDATA[]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Input name="FrontTactilTouched" type="0" type_size="1" nature="4" stm_value_name="FrontTactilTouched" inner="1" tooltip="FrontTactilTouched desc" id="4" /><Input name="HandRightBackTouched" type="0" type_size="1" nature="4" stm_value_name="HandRightBackTouched" inner="1" tooltip="HandRightBackTouched desc" id="5" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="ボックスBehaviorの終了時に信号を送る。" id="6" /><Timeline enable="0"><BehaviorLayer name="behavior_layer1"><BehaviorKeyframe name="keyframe1" index="1"><Diagram><Box name="SetPathLibFld" id="1" localization="8" tooltip="プロジェクトの Lib フォルダーに Python パスを通す" x="96" y="29"><bitmap>media/images/box/box-python-script.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        self.pathModified = False
+
+    def onUnload(self):
+        if self.pathModified and self.folderName and self.folderName in sys.path:
+            sys.path.remove(self.folderName)
+        self.folderName = None
+
+    def onInput_onStart(self):
+        appFolder = self.behaviorAbsolutePath().replace(self.behaviorRelativePath(), "")
+        self.folderName = os.path.join(appFolder, "lib")
+        if self.folderName not in sys.path:
+            sys.path.append(self.folderName)
+            self.pathModified = True
+
+        self.onReady()
+
+    def onInput_onStop(self):
+        self.onUnload() #it is recommended to reuse the clean-up as the box is stopped
+        self.onStopped() #activate the output of the box]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Output name="onReady" type="1" type_size="1" nature="2" inner="0" tooltip="" id="5" /></Box><Box name="Prediction" id="2" localization="8" tooltip="This box contains a basic python script and can be used to create any python script box you would like.&#x0A;&#x0A;To edit its script, double-click on it." x="229" y="139"><bitmap>media/images/box/box-python-script.png</bitmap><script language="4"><content><![CDATA[import os
+import sys
+import argparse
+import base64
+import json
+import cv2
+
+STANDARD_COLOR = {
+'red'  : (255, 0, 0),
+'lime' : (0, 255, 0),
+'blue' : (0, 0, 255),
+'yellow':(255, 255, 0),
+'cyan' : (0, 255, 255),
+'magnenta': (255, 0, 255),
+'silver' : (192, 192, 192),
+'gray' : (128, 128, 128),
+'maroon' : (128, 0, 0),
+'olive': (128, 128, 0),
+'green' :(0, 128, 0),
+'purple':(128, 0, 128),
+'teal' : (0, 128, 128),
+'navy' : (0, 0, 128),
+'black': (0, 0, 0),
+'white': (255, 255, 255),
+}
+
+
+class MyClass(GeneratedClass):
+    def __init__(self, project_name = "testproject", model_name = "testmodel", version = "v1", use_gcp_gpu = True, key_path = None):
+        GeneratedClass.__init__(self)
+        self.PROJECT_NAME = project_name
+        self.MODEL_NAME = model_name
+        self.VERSION = version
+        self.KEY_PATH = key_path
+        self.IOU_THRESH = 0.9
+        self.USE_GCP_GPU = use_gcp_gpu
+
+    def onLoad(self):
+        #put initialization code here
+        self.memory = ALProxy("ALMemory")
+
+        self.PROJECT_NAME = self.getParameter("Project Name")
+        self.MODEL_NAME = self.getParameter("Model Name")
+        self.VERSION = self.getParameter("Version")
+
+    def onUnload(self):
+        #put clean-up code here
+        pass
+
+    def parse_label_files(self, file_path):
+
+        f = open(file_path)
+        lines = f.read().splitlines()
+        lines = [l.strip() for l in lines]
+        f.close()
+        try:
+            lines.remove("")
+        except ValueError:
+            pass
+
+        ids = []
+        classes = []
+
+        for line in lines:
+            if ":" in line:
+                current_line_split = line.split(" ")
+                try:
+                    current_line_split.remove("")
+                except ValueError:
+                    pass
+
+                if "id:" in current_line_split:
+                    ids.append(current_line_split[1])
+                if "name:" in current_line_split:
+                    classes.append(current_line_split[1].strip("'"))
+
+        result = {}
+        for i in range(len(ids)):
+            result[i + 1] = {"id": ids[i], "name": classes[i]}
+
+        return result, classes
+
+    def predict_json(self, project, model, instances, http, version=None):
+
+        import googleapiclient.discovery
+        service = googleapiclient.discovery.build('ml', 'v1', http = http)
+        name = 'projects/{}/models/{}'.format(project, model)
+
+        if version is not None:
+            name += '/versions/{}'.format(version)
+
+        response = service.projects().predict(
+            name=name,
+            body={'instances': instances}
+        ).execute()
+
+        if 'error' in response:
+            raise RuntimeError(response['error'])
+
+        return response['predictions']
+
+
+    def gcp_prediction(self, img, project, model, http, version=None):
+        """Send user input to the prediction service."""
+
+        # img = cv2.imread(image_path)
+        retval, buf = cv2.imencode('.jpg', img)
+        _input = {}
+        _input["b64"] = base64.b64encode(buf.tostring())
+
+        try:
+            user_input = _input
+        except KeyboardInterrupt:
+            return
+
+        if not isinstance(user_input, list):
+            user_input = [user_input]
+        try:
+            result = self.predict_json(
+                project, model, user_input, http, version=version)
+        except RuntimeError as err:
+            print(str(err))
+        else:
+            return result
+
+    def bbox_result(self, img_width, img_height, boxes, classes, scores, category_index, use_normalized_coordinates=False, max_boxes_to_draw=20, min_score_thresh=.7, agnostic_mode = False):
+
+        from collections import defaultdict
+
+        box_to_display_str_map = defaultdict(list)
+        if not max_boxes_to_draw:
+            max_boxes_to_draw = boxes.shape[0]
+
+        for i in range(min(max_boxes_to_draw, boxes.shape[0])):
+            if scores is None or scores[i] > min_score_thresh:
+                box = tuple(boxes[i].tolist())
+                if scores is None:
+                    return None
+                else:
+                    if not agnostic_mode:
+                        if classes[i] in category_index.keys():
+                            class_name = category_index[classes[i]]['name']
+                        else:
+                            class_name = 'N/A'
+                        display_str = '{}: {}%'.format(
+                            class_name,
+                            int(100*scores[i]))
+                    else:
+                        display_str = 'score: {}%'.format(int(100 * scores[i]))
+
+                    box_to_display_str_map[box].append(display_str)
+
+        results = []
+        for _key, _val in box_to_display_str_map.items():
+
+            y_min, x_min, y_max, x_max = _key
+            name_confidence = _val[0]
+            name_confidence_split = name_confidence.split(":")
+            class_name = name_confidence_split[0]
+            confidence = int(name_confidence_split[1][:-1])
+            if use_normalized_coordinates:
+                (x_min, x_max, y_min, y_max) = (x_min * img_width, x_max * img_width, y_min * img_height, y_max * img_height)
+
+            results.append({'className':class_name, 'confidence':confidence, 'xMin':x_min, 'yMin':y_min, 'xMax':x_max, 'yMax':y_max})
+
+        return results
+
+    def bb_intersection_over_union(self, box1, box2):
+        xA = max(box1['xMax'], box2['xMax'])
+        yA = max(box1['yMax'], box2['yMax'])
+        xB = min(box1['xMin'], box2['xMin'])
+        yB = min(box1['yMin'], box2['yMin'])
+
+        interArea = (xB - xA + 1) * (yB - yA + 1)
+
+        box1Area = (box1['xMax'] - box1['xMin'] + 1) * (box1['yMax'] - box1['yMin'] + 1)
+        box2Area = (box2['xMax'] - box2['xMin'] + 1) * (box2['yMax'] - box2['yMin'] + 1)
+
+        iou = interArea / float(box1Area + box2Area - interArea)
+
+        return iou
+
+    def box_inside_box(self, box1, box2):
+        '''
+        Check if box2 is in box1
+        '''
+        if (box1['xMin'] < box2['xMin']  and box1['xMax'] > box2['xMax']
+            and box1['yMin'] < box2['yMin'] and box1['yMax'] > box2['yMax']):
+            return True
+
+        return False
+
+    def post_processing_iou(self, pre_results):
+        remove_boxes = []
+        final_boxes = []
+        current_len = len(pre_results)
+        for i in range(current_len):
+            if pre_results[i] not in remove_boxes:
+                for j in range(i + 1, current_len - 1):
+                    if pre_results[j] not in remove_boxes:
+                        if self.box_inside_box(pre_results[i], pre_results[j]):
+                            remove_boxes.append(pre_results[j])
+                        elif self.box_inside_box(pre_results[j], pre_results[i]):
+                            remove_boxes.append(pre_results[i])
+                            break
+                        else:
+                            if (self.bb_intersection_over_union(pre_results[i], pre_results[j]) > self.IOU_THRESH):
+                                if (pre_results[i]['confidence'] <= pre_results[j]['confidence']):
+                                    remove_boxes.append(pre_results[i])
+                                    break
+                                else:
+                                    remove_boxes.append(pre_results[j])
+
+        final_boxes = [box for box in pre_results if box not in remove_boxes]
+
+        return final_boxes
+
+    def onInput_onStart(self, p):
+
+        self.memory.raiseEvent('ssa-hw-say', '画像認識を開始します')
+
+        import sixm
+        import numpy as np
+        import googleapiclient.discovery
+        from oauth2client.client import GoogleCredentials
+        import httplib2
+
+        appFolder = self.behaviorAbsolutePath().replace(self.behaviorRelativePath(), '')
+
+        # 入力画像の読み込み
+        img = cv2.imread(p)
+        results = None
+
+        PATH_TO_LABELS = os.path.join(appFolder, self.getParameter("Label Path"))
+        category_index = self.parse_label_files(PATH_TO_LABELS)
+
+        if (not self.USE_GCP_GPU):
+            self.KEY_PATH = os.path.join(appFolder, self.getParameter("Key Path"))
+            self.logger.info("[Prediction] key: " + self.KEY_PATH)
+
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.KEY_PATH
+            credentials = GoogleCredentials.get_application_default()
+            scope = ["https://www.googleapis.com/auth/cloud-platform"]
+            if credentials.create_scoped_required():
+                credentials = credentials.create_scoped(scope)
+
+            timeout = self.getParameter("Timeout")
+            http = httplib2.Http(timeout = timeout)
+            credentials.authorize(http)
+
+            result = self.gcp_prediction(img, self.PROJECT_NAME, self.MODEL_NAME, http, version = self.VERSION)
+
+            boxes = result[0]['detection_boxes']
+            scores = result[0]['detection_scores']
+            classes = result[0]['detection_classes']
+
+            img_height, img_width = img.shape[:2]
+            results = self.bbox_result(img_width, img_height, np.squeeze(boxes),         np.squeeze(classes).astype(np.int32), np.squeeze(scores), category_index[0],     use_normalized_coordinates=True)
+            results = self.post_processing_iou(results)
+
+        else:
+            import requests
+            uploadFile = open(p, 'rb')
+            fileName = os.path.basename(p)
+
+            files = {'file': (fileName, uploadFile, 'image/jpeg')}
+            headers = {'Bearer': self.getParameter("GPU API Key")}
+
+            r = requests.post(self.getParameter("GPU API Url"), files=files, headers=headers)
+            self.logger.info(str(json.loads(r.text)))
+            results = json.loads(r.text)
+
+        self.logger.info('[Prediction] result returned')
+        self.logger.info('[Prediction] ' + str(results))
+
+        outputImgName = 'out_' + os.path.basename(p)
+
+        # 結果画像の出力
+        for result in results:
+            class_name = result['className']
+            color_index = category_index[1].index(class_name) % len(STANDARD_COLOR.values())
+            _color = STANDARD_COLOR.values()[color_index]
+
+            x_min = int(result['xMin'])
+            y_min = int(result['yMin'])
+            x_max = int(result['xMax'])
+            y_max = int(result['yMax'])
+            confidence = result['confidence']
+            _text = class_name + "_" + str(confidence)
+            cv2.rectangle(img, (x_min, y_min), (x_max, y_max), _color, 3)
+            cv2.putText(img, _text, (x_min, y_min - 1), cv2.FONT_HERSHEY_SIMPLEX, 1, _color, 2)
+
+        cv2.imwrite(appFolder + "html/img/" + outputImgName, img)
+
+        self.memory.raiseEvent('ssa-hw-imgshow', './img/' + outputImgName)
+
+        # ログ出力
+        jsonString = json.dumps(results).encode('utf-8')
+
+        self.logger.info('[Prediction] ' + jsonString)
+        self.onStopped(jsonString)
+
+    def onInput_onStop(self):
+        self.onUnload() #it is recommended to reuse the clean-up as the box is stopped
+        self.onStopped() #activate the output of the box]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="0" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="0" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Parameter name="Project Name" inherits_from_parent="0" content_type="3" value="YOUR_GCP_PROJECT_NAME" default_value="" custom_choice="0" tooltip="" id="5" /><Parameter name="Model Name" inherits_from_parent="0" content_type="3" value="YOUR_ML_MODEL_NAME" default_value="" custom_choice="0" tooltip="" id="6" /><Parameter name="Key Path" inherits_from_parent="0" content_type="3" value="YOUR_GPU_CLIENT_ACCESS_KEY" default_value="" custom_choice="0" tooltip="" id="7" /><Parameter name="Label Path" inherits_from_parent="0" content_type="3" value="samplepb.pbtxt" default_value="" custom_choice="0" tooltip="" id="8" /><Parameter name="Version" inherits_from_parent="0" content_type="3" value="v1" default_value="" custom_choice="0" tooltip="" id="9" /><Parameter name="Timeout" inherits_from_parent="0" content_type="1" value="180" default_value="180" min="1" max="1000" tooltip="" id="10" /><Parameter name="GPU API Url" inherits_from_parent="0" content_type="3" value="YOUR_GPU_SERVER_URL" default_value="" custom_choice="0" tooltip="" id="11" /><Parameter name="GPU API Key" inherits_from_parent="0" content_type="3" value="YOUR_GPU_SERVER_API_KEY" default_value="" custom_choice="0" tooltip="" id="12" /></Box><Box name="SayJSON" id="5" localization="8" tooltip="This box contains a basic python script and can be used to create any python script box you would like.&#x0A;&#x0A;To edit its script, double-click on it." x="357" y="139"><bitmap>media/images/box/interaction/say.png</bitmap><script language="4"><content><![CDATA[import json
+import time
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+        self.memory = ALProxy('ALMemory')
+
+    def onLoad(self):
+        #put initialization code here
+        pass
+
+    def onUnload(self):
+        #put clean-up code here
+        pass
+
+    def onInput_onStart(self, p):
+        '''
+        JSON文字列を受け取り結果を話すルーチン
+        '''
+        # JSONをパースする
+        try:
+            sayContents = json.loads(p)
+        except:
+            self.memory.raiseEvent('ssa-hw-say', '入力データが不正です')
+            return -1
+
+        total = 0
+        index = 0
+        speech = ""
+        # パースされた内容を話す
+        if (len(sayContents) != 0):
+            for content in sayContents:
+                if(index == 0):
+                    speech += "%s" % (str(content['className']))
+                else:
+                    speech += "と、%s" % (str(content['className']))
+                total += self.getPrice(str(content['className']))
+                index += 1
+            # 合計
+            speech += "ですね。合計で%s円です。" % (str(total))
+            self.memory.raiseEvent('ssa-hw-say', speech)
+            time.sleep(15)
+        else:
+            self.memory.raiseEvent('ssa-hw-say', '認識できませんでした')
+
+        self.onStopped()
+
+    def onInput_onStop(self):
+        self.onUnload() #it is recommended to reuse the clean-up as the box is stopped
+        self.onStopped() #activate the output of the box
+
+    def getPrice(self, className):
+        '''
+        金額を返すルーチン
+        '''
+        priceData = {
+        "wasabi_snack":120,
+        "cream_collon":120,
+        "komugi_bisuco":100,
+        "cream_bisuco":100,
+        "butter_bisuco":100,
+        "cheese_cake":100
+        }
+        if(className in priceData.keys()):
+            return priceData[className]
+        else:
+            return 0]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="3" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /></Box><Box name="TakePhoto" id="6" localization="8" tooltip="Enter description here" x="98" y="138"><bitmap>media/images/box/box-diagram.png</bitmap><script language="4"><content><![CDATA[]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="TakePhoto Script_onStart" type="1" type_size="1" nature="2" inner="0" tooltip="This input has been automatically generated&#x0A;by converting several boxes into a single box." id="2" /><Output name="TakePhotoScript_onStopped" type="0" type_size="1" nature="2" inner="0" tooltip="This output has been automatically generated&#x0A;by converting several boxes into a single box." id="3" /><Timeline enable="0"><BehaviorLayer name="behavior_layer1"><BehaviorKeyframe name="keyframe1" index="1"><Diagram><Box name="TakePhoto Script" id="4" localization="8" tooltip="This box contains a basic python script and can be used to create any python script box you would like.&#x0A;&#x0A;To edit its script, double-click on it." x="132" y="138"><bitmap>media/images/box/box-python-script.png</bitmap><script language="4"><content><![CDATA[import os
+import sys
+import time
+
+'''
+image Path
+/home/nao/.local/share/PackageManager/apps/.lastUploadedChoregrapheBehavior/html/temp.jpg
+'''
+
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+        self.photoCapture = ALProxy("ALPhotoCapture")
+        self.memory = ALProxy("ALMemory")
+        self.motion = ALProxy("ALMotion")
+
+    def onLoad(self):
+        #put initialization code here
+        pass
+
+    def onUnload(self):
+        #put clean-up code here
+        pass
+
+    def onInput_onStart(self, p):
+        #self.onStopped() #activate the output of the box
+
+        # 写真を撮影する
+
+        # ブレスモーションを無効化
+        self.motion.setBreathEnabled('Body', 0)
+        self.memory.raiseEvent('ssa-hw-say', '写真をとります')
+
+        # モーション動きと合うようにウエイトを置く
+        time.sleep(2.2)
+
+        appFolder = self.behaviorAbsolutePath().replace(self.behaviorRelativePath(), '')
+
+        # タブレット側にキャッシュが残るためランダムな文字列を生成する
+        tempName = "".join([random.choice('abcdefghijklmnopqrstuvwxyz') for x in xrange(10)])
+        outFileName = '%s.jpg' % (tempName)
+
+        htmlFolder = os.path.join(appFolder, 'html/img')
+        self.logger.info("[TakePhotoBox]: htmlFolder " + htmlFolder)
+
+        if self.photoCapture:
+            self.photoCapture.setResolution(2)
+            self.photoCapture.setCameraID(0)
+            self.photoCapture.setPictureFormat('jpg')
+            self.photoCapture.takePicture(htmlFolder, outFileName)
+
+        photoPath = os.path.join(htmlFolder, outFileName)
+        # 画像を表示する
+        self.memory.raiseEvent('ssa-hw-imgshow', './img/' + outFileName)
+
+        self.logger.info("[TakePhotoBox]: photoPath " + photoPath)
+
+        time.sleep(1.0)
+
+        # ブレスモーションを有効化
+        self.motion.setBreathEnabled('Body', 0)
+
+        self.onStopped(photoPath)
+
+    def onInput_onStop(self):
+
+        self.onUnload() #it is recommended to reuse the clean-up as the box is stopped
+        self.onStopped() #activate the output of the box]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="0" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="0" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /></Box><Box name="TakePicture" id="3" localization="8" tooltip="ID : #04C 0003&#x0A;&#x0A;===================&#x0A;&#x0A;Tags :&#x0A;- Picture" x="133" y="26"><bitmap>media/images/box/movement/move.png</bitmap><script language="4"><content><![CDATA[]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Timeline enable="1" fps="25" start_frame="1" end_frame="125" size="125"><BehaviorLayer name="behavior_layer1"><BehaviorKeyframe name="keyframe14" index="14"><Diagram><Box name="Blink" id="2" localization="8" tooltip="tags:&#x0A;LED" x="108" y="35"><bitmap>media/images/box/interaction/LED.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        #~ puts code for box initialization here
+        pass
+
+    def onUnload(self):
+        #~ puts code for box cleanup here
+        pass
+
+    def onInput_onStart(self):
+        rDuration = 0.05;
+        ALLeds.post.fadeRGB( "FaceLed0", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed1", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed2", 0xffffff, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed3", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed4", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed5", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed6", 0xffffff, rDuration );
+        ALLeds.fadeRGB( "FaceLed7", 0x000000, rDuration );
+
+        time.sleep( 0.1 );
+
+        rDuration = 0.05;
+        ALLeds.fadeRGB( "FaceLeds", 0xffffff, rDuration );
+
+        self.onStopped()
+
+
+    def onInput_onStop(self):
+        self.onUnload() #~ it is usually a good idea to call onUnload of this box in a onStop method, as the code written in onUnload is used to finish the working of the box as well
+        pass]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /></Box><Box name="EyesOnOff" id="6" localization="8" tooltip="tags:&#x0A;LED" x="248" y="36"><bitmap>media/images/box/interaction/LED.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        #~ puts code for box initialization here
+        pass
+
+    def onUnload(self):
+        #~ puts code for box cleanup here
+        pass
+
+    def onInput_onStart(self):
+        rDuration = self.getParameter('Timing')
+
+        self.logger.info(self.getParameter('Eyes'))
+
+        if(self.getParameter('Eyes') == 'On'):
+            nColor = 0xFFFFFF
+        else:
+            nColor = 0x000000
+
+        ALLeds.fadeRGB( "FaceLeds", nColor, rDuration );
+
+        self.onStopped()
+
+    def onInput_onStop(self):
+        self.onUnload() #~ it is usually a good idea to call onUnload of this box in a onStop method, as the code written in onUnload is used to finish the working of the box as well
+        pass]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Parameter name="Eyes" inherits_from_parent="0" content_type="3" value="Off" default_value="On" custom_choice="0" tooltip="" id="5"><Choice value="On" /><Choice value="Off" /></Parameter><Parameter name="Timing" inherits_from_parent="0" content_type="2" value="0.5" default_value="0.5" min="0.05" max="10.05" tooltip="" id="6" /></Box><Link inputowner="2" indexofinput="2" outputowner="0" indexofoutput="1" /><Link inputowner="6" indexofinput="2" outputowner="2" indexofoutput="4" /></Diagram></BehaviorKeyframe><BehaviorKeyframe name="keyframe43" index="43"><Diagram><Box name="Flash" id="4" localization="8" tooltip="tags:&#x0A;LED" x="84" y="32"><bitmap>media/images/box/interaction/LED.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        #~ puts code for box initialization here
+        pass
+
+    def onUnload(self):
+        #~ puts code for box cleanup here
+        pass
+
+    def onInput_onStart(self):
+        rDuration = 0.1;
+        ALLeds.fadeRGB( "FaceLeds", 0xffffff, rDuration );
+
+        time.sleep( 0.05 );
+
+        rDuration = 1;
+        ALLeds.fadeRGB( "FaceLeds", 0x000000, rDuration );
+
+        self.onStopped()
+
+
+    def onInput_onStop(self):
+        self.onUnload() #~ it is usually a good idea to call onUnload of this box in a onStop method, as the code written in onUnload is used to finish the working of the box as well
+        pass]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /></Box><Box name="Blink" id="6" localization="8" tooltip="tags:&#x0A;LED" x="247" y="28"><bitmap>media/images/box/interaction/LED.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        #~ puts code for box initialization here
+        pass
+
+    def onUnload(self):
+        #~ puts code for box cleanup here
+        pass
+
+    def onInput_onStart(self):
+        rDuration = 0.05;
+        ALLeds.post.fadeRGB( "FaceLed0", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed1", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed2", 0xffffff, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed3", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed4", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed5", 0x000000, rDuration );
+        ALLeds.post.fadeRGB( "FaceLed6", 0xffffff, rDuration );
+        ALLeds.fadeRGB( "FaceLed7", 0x000000, rDuration );
+
+        time.sleep( 0.1 );
+
+        rDuration = 0.05;
+        ALLeds.fadeRGB( "FaceLeds", 0xffffff, rDuration );
+
+        self.onStopped()
+
+
+    def onInput_onStop(self):
+        self.onUnload() #~ it is usually a good idea to call onUnload of this box in a onStop method, as the code written in onUnload is used to finish the working of the box as well
+        pass]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /></Box><Link inputowner="6" indexofinput="2" outputowner="4" indexofoutput="4" /><Link inputowner="4" indexofinput="2" outputowner="0" indexofoutput="1" /></Diagram></BehaviorKeyframe></BehaviorLayer><BehaviorLayer name="behavior_layer2"><BehaviorKeyframe name="keyframe83" index="83"><Diagram><Box name="Play Sound" id="3" localization="8" tooltip="Play a sound file. Select the file in parameters. The format of the file can be&#x0A;wav, mp3, or ogg.&#x0A;&#x0A;Note: There can be some delay to play mp3 files. We advise you to use wav if&#x0A;you want a fast play of the file." x="91" y="19"><bitmap>media/images/box/interaction/play_music.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        self.bIsRunning = False
+
+    def onUnload(self):
+        self.bIsRunning = False
+
+    def onInput_onStart(self):
+        self.bIsRunning = True
+
+    def onInput_onStop(self):
+        if( self.bIsRunning ):
+            self.onUnload()
+            self.onStopped()]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when Diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Starts the music." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Stops the music." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished or stopped." id="4" /><Parameter name="File name" inherits_from_parent="0" content_type="4" value="/camera1.ogg" default_value="" tooltip="Name of the file you want to play.&#x0A;&#x0A;Note: You can click on the folder icon to browse the project content or import&#x0A;new files to the project." id="5" /><Parameter name="Begin position (s)" inherits_from_parent="0" content_type="2" value="0" default_value="0" min="0" max="600" tooltip="Position in seconds where the playing must start." id="6" /><Parameter name="Volume (%)" inherits_from_parent="0" content_type="1" value="100" default_value="100" min="0" max="100" tooltip="Volume the file is played with." id="7" /><Parameter name="Balance L/R" inherits_from_parent="0" content_type="2" value="0" default_value="0" min="-1" max="1" tooltip="Value which determines if the sound is played more on NAO&apos;s left or right.&#x0A;You can particularly set it to:&#x0A;- -1 to play only on the left loudspeaker.&#x0A;- 0 to play on both loudspeakers.&#x0A;- 1 to play only on the right loudspeaker." id="8" /><Parameter name="Play in loop" inherits_from_parent="0" content_type="0" value="0" default_value="0" tooltip="This parameter allows to play the file in loop. The playing will start each time at&#x0A;the beginning of the file." id="9" /><Timeline enable="0"><BehaviorLayer name="behavior_layer1"><BehaviorKeyframe name="keyframe1" index="1"><Diagram><Box name="Play Sound File" id="2" localization="8" tooltip="Play the sound." x="442" y="70"><bitmap>media/images/box/interaction/play_music.png</bitmap><script language="4"><content><![CDATA[import time
+
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+        self.player = ALProxy('ALAudioPlayer')
+        self.playerStop = ALProxy('ALAudioPlayer', True) #Create another proxy as wait is blocking if audioout is remote
+
+    def onLoad(self):
+        self.bIsRunning = False
+        self.ids = []
+
+    def onUnload(self):
+        for id in self.ids:
+            try:
+                self.playerStop.stop(id)
+            except:
+                pass
+        while( self.bIsRunning ):
+            time.sleep( 0.2 )
+
+    def onInput_onStart(self, p):
+        self.bIsRunning = True
+        try:
+            if (self.getParameter("Play in loop")) :
+               id = self.player.post.playFileInLoop(p,self.getParameter("Volume (%)")/100.,self.getParameter("Balance L/R"))
+            else :
+               id = self.player.post.playFileFromPosition(p,self.getParameter("Begin position (s)"),self.getParameter("Volume (%)")/100.,self.getParameter("Balance L/R"))
+            self.ids.append(id)
+            self.player.wait(id, 0)
+        finally:
+            try:
+                self.ids.remove(id)
+            except:
+                pass
+            if( self.ids == [] ):
+                self.onStopped() # activate output of the box
+                self.bIsRunning = False
+
+    def onInput_onStop(self):
+        self.onUnload()]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when Diagram is loaded." id="1" /><Input name="onStart" type="3" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this Input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this Input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when Box behavior is finished." id="4" /><Parameter name="Begin position (s)" inherits_from_parent="1" content_type="2" value="0" default_value="0" min="0" max="600" tooltip="Position in seconds where the playing must start." id="5" /><Parameter name="Volume (%)" inherits_from_parent="1" content_type="1" value="100" default_value="100" min="0" max="100" tooltip="Volume the file is played with." id="6" /><Parameter name="Balance L/R" inherits_from_parent="1" content_type="2" value="0" default_value="0" min="-1" max="1" tooltip="Value which determines if the sound is played more on NAO&apos;s left or right.&#x0A;You can particularly set it to:&#x0A;- -1 to play only on the left loudspeaker.&#x0A;- 0 to play on both loudspeakers.&#x0A;- 1 to play only on the right loudspeaker." id="7" /><Parameter name="Play in loop" inherits_from_parent="1" content_type="0" value="0" default_value="0" tooltip="This parameter allows to play the file in loop. The playing will start each time at&#x0A;the beginning of the file." id="8" /><Resource name="Audio player" type="Stop on demand" timeout="0" /></Box><Box name="Get Attached File" id="1" localization="8" tooltip="Use this box to choose an attached file in its parameters. The filename will be sent on&#x0A;the output when the input is stimulated." x="216" y="71"><bitmap>media/images/box/folder.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        pass
+
+    def onInput_onStart(self):
+        self.onStopped(self.behaviorAbsolutePath() + self.getParameter("File name"))]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="1" inner="0" tooltip="To send the filepath on the output." id="2" /><Output name="onStopped" type="3" type_size="1" nature="2" inner="0" tooltip="The filepath of the selected resource file." id="3" /><Parameter name="File name" inherits_from_parent="1" content_type="4" value="" default_value="" tooltip="Name of the file which is going to be sent on the box output.&#x0A;&#x0A;Note: You can click on the folder icon to browse the project content or import&#x0A;new files to the project." id="4" /></Box><Link inputowner="0" indexofinput="4" outputowner="2" indexofoutput="4" /><Link inputowner="1" indexofinput="2" outputowner="0" indexofoutput="2" /><Link inputowner="2" indexofinput="2" outputowner="1" indexofoutput="3" /></Diagram></BehaviorKeyframe></BehaviorLayer></Timeline></Box><Link inputowner="3" indexofinput="2" outputowner="0" indexofoutput="1" /></Diagram></BehaviorKeyframe></BehaviorLayer><ActuatorList model=""><ActuatorCurve name="value" actuator="HeadPitch" mute="0" unit="0"><Key frame="26" value="18.0975" /><Key frame="87" value="18.0975" /><Key frame="109" value="-11.8759" /></ActuatorCurve><ActuatorCurve name="value" actuator="HeadYaw" mute="0" unit="0"><Key frame="42" value="-2.46337" /><Key frame="52" value="-2.81494" /><Key frame="62" value="-2.99072" /><Key frame="65" value="-2.70816" /><Key frame="95" value="-2.70816" /><Key frame="123" value="-1.145" /></ActuatorCurve><ActuatorCurve name="value" actuator="HipPitch" mute="0" unit="0"><Key frame="26" value="-15.5456" /><Key frame="41" value="-2.06906" /><Key frame="65" value="-2.06906" /><Key frame="95" value="-2.06906" /><Key frame="120" value="-2.1955" /></ActuatorCurve><ActuatorCurve name="value" actuator="HipRoll" mute="0" unit="0"><Key frame="41" value="0" /><Key frame="65" value="0" /><Key frame="95" value="0" /><Key frame="120" value="0" /></ActuatorCurve><ActuatorCurve name="value" actuator="KneePitch" mute="0" unit="0"><Key frame="26" value="7.94935" /><Key frame="41" value="0.138683" /><Key frame="65" value="0.138683" /><Key frame="95" value="0.138683" /><Key frame="120" value="-0.259007" /></ActuatorCurve><ActuatorCurve name="value" actuator="LElbowRoll" mute="0" unit="0"><Key frame="18" value="-69" /><Key frame="41" value="-88.5" /><Key frame="55" value="-88.5" /><Key frame="65" value="-87.8062" /><Key frame="95" value="-87.8062" /><Key frame="109" value="-82.2" /><Key frame="120" value="-25.4862" /></ActuatorCurve><ActuatorCurve name="value" actuator="LElbowYaw" mute="0" unit="0"><Key frame="18" value="-41.3" /><Key frame="41" value="-46.5607" /><Key frame="55" value="-46.5607" /><Key frame="59" value="-40.9561" /><Key frame="65" value="-47.0001" /><Key frame="95" value="-47.0001" /><Key frame="120" value="-66.888" /></ActuatorCurve><ActuatorCurve name="value" actuator="LHand" mute="0" unit="1"><Key frame="18" value="0.57" /><Key frame="41" value="1" /><Key frame="55" value="1" /><Key frame="59" value="0.12" /><Key frame="62" value="1" /><Key frame="65" value="0.9004" /><Key frame="95" value="0.9004" /><Key frame="120" value="0.3024" /></ActuatorCurve><ActuatorCurve name="value" actuator="LShoulderPitch" mute="0" unit="0"><Key frame="41" value="-29.3448" /><Key frame="55" value="-29.3448" /><Key frame="65" value="-25.126" /><Key frame="95" value="-25.126" /><Key frame="120" value="86.3073" /></ActuatorCurve><ActuatorCurve name="value" actuator="LShoulderRoll" mute="0" unit="0"><Key frame="18" value="32.8" /><Key frame="41" value="27.442" /><Key frame="55" value="27.442" /><Key frame="65" value="26.2115" /><Key frame="95" value="26.2115" /><Key frame="120" value="6.67737" /></ActuatorCurve><ActuatorCurve name="value" actuator="LWristYaw" mute="0" unit="0"><Key frame="18" value="22.5" /><Key frame="41" value="13.6359" /><Key frame="55" value="13.6359" /><Key frame="65" value="14.5148" /><Key frame="95" value="14.5148" /><Key frame="120" value="7.46839" /></ActuatorCurve><ActuatorCurve name="value" actuator="RElbowRoll" mute="0" unit="0"><Key frame="18" value="69" /><Key frame="41" value="88.5" /><Key frame="55" value="88.5" /><Key frame="65" value="87.8062" /><Key frame="95" value="87.8062" /><Key frame="109" value="82.2" /><Key frame="120" value="23.9968" /></ActuatorCurve><ActuatorCurve name="value" actuator="RElbowYaw" mute="0" unit="0"><Key frame="18" value="41.3" /><Key frame="41" value="46.5607" /><Key frame="55" value="46.5607" /><Key frame="59" value="40.9561" /><Key frame="65" value="47.0001" /><Key frame="95" value="47.0001" /><Key frame="120" value="66.0922" /></ActuatorCurve><ActuatorCurve name="value" actuator="RHand" mute="0" unit="1"><Key frame="18" value="0.57" /><Key frame="41" value="1" /><Key frame="55" value="1" /><Key frame="59" value="0.12" /><Key frame="62" value="1" /><Key frame="65" value="0.9004" /><Key frame="95" value="0.9004" /><Key frame="120" value="0.3052" /></ActuatorCurve><ActuatorCurve name="value" actuator="RShoulderPitch" mute="0" unit="0"><Key frame="41" value="-29.3448" /><Key frame="55" value="-29.3448" /><Key frame="65" value="-25.126" /><Key frame="95" value="-25.126" /><Key frame="120" value="86.2242" /></ActuatorCurve><ActuatorCurve name="value" actuator="RShoulderRoll" mute="0" unit="0"><Key frame="18" value="-32.8" /><Key frame="41" value="-27.442" /><Key frame="55" value="-27.442" /><Key frame="65" value="-26.2115" /><Key frame="95" value="-26.2115" /><Key frame="120" value="-7.29742" /></ActuatorCurve><ActuatorCurve name="value" actuator="RWristYaw" mute="0" unit="0"><Key frame="18" value="-22.5" /><Key frame="41" value="-13.6359" /><Key frame="55" value="-13.6359" /><Key frame="65" value="-14.5148" /><Key frame="95" value="-14.5148" /><Key frame="120" value="10.193" /></ActuatorCurve></ActuatorList></Timeline><Resource name="Standing" type="Lock" timeout="1" /><Resource name="All motors" type="Lock" timeout="1" /><Resource name="Left eye leds" type="Lock" timeout="1" /><Resource name="Right eye leds" type="Lock" timeout="1" /><Resource name="Speakers" type="Lock" timeout="1" /></Box><Link inputowner="4" indexofinput="2" outputowner="0" indexofoutput="2" /><Link inputowner="0" indexofinput="3" outputowner="4" indexofoutput="4" /><Link inputowner="3" indexofinput="2" outputowner="0" indexofoutput="2" /></Diagram></BehaviorKeyframe></BehaviorLayer></Timeline></Box><Link inputowner="1" indexofinput="2" outputowner="0" indexofoutput="2" /><Link inputowner="2" indexofinput="2" outputowner="6" indexofoutput="3" /><Link inputowner="5" indexofinput="2" outputowner="2" indexofoutput="4" /><Link inputowner="0" indexofinput="6" outputowner="0" indexofoutput="4" /><Link inputowner="6" indexofinput="2" outputowner="1" indexofoutput="5" /><Link inputowner="0" indexofinput="6" outputowner="5" indexofoutput="4" /></Diagram></BehaviorKeyframe></BehaviorLayer></Timeline></Box></ChoregrapheProject>

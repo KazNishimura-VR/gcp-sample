@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8" ?><ChoregrapheProject xmlns="http://www.aldebaran-robotics.com/schema/choregraphe/project.xsd" xar_version="3"><Box name="root" id="-1" localization="8" tooltip="Root box of Choregraphe&apos;s behavior. Highest level possible." x="0" y="0"><bitmap>media/images/box/root.png</bitmap><script language="4"><content><![CDATA[]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Timeline enable="0"><BehaviorLayer name="behavior_layer1"><BehaviorKeyframe name="keyframe1" index="1"><Diagram scale="84.0896"><Box name="Translate" id="6" localization="8" tooltip="This box use Google Translation API(Google Cloud Platform).&#x0A;It set Pepper&apos;s Language and translate from input string data." x="320" y="130"><bitmap>media/images/box/box-python-script.png</bitmap><script language="4"><content><![CDATA[# -*- coding: utf-8 -*-
+
+import os
+import sys
+import json
+
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        self.folderName = None
+
+        # Proxy設定
+        try:
+            self.tts = ALProxy("ALTextToSpeech")
+        except:
+            self.logger.warn("ALTextToSpeech is not available, language setting cannot be applied to speech")
+            self.tts = None
+
+        try:
+            self.asr = ALProxy("ALSpeechRecognition")
+        except:
+            self.logger.warn("ALSpeechRecognition is not available, language setting cannot be applied to recognition")
+            self.asr = None
+
+        try:
+            self.dialog = ALProxy("ALDialog")
+        except:
+            self.logger.warn("ALDialog is not available, language setting cannot be applied to dialog")
+            self.dialog = None
+
+    def onUnload(self):
+        # put clean-up code here
+        '''
+        ライブラリフォルダにパスを外す
+        （干渉がある場合は外すこと）
+        '''
+        if self.folderName and self.folderName in sys.path:
+            sys.path.remove(self.folderName)
+        self.folderName = None
+
+    def setLanguage(self, lang):
+        '''
+        言語を設定する
+        '''
+        try:
+            if self.asr:
+                self.asr.setLanguage( self.getParameter("Language") )
+            if self.tts:
+                self.tts.setLanguage( self.getParameter("Language") )
+            if self.dialog:
+                self.dialog.setLanguage( self.getParameter("Language") )
+            if self.tts is None and self.asr is None and self.dialog is None:
+                raise RuntimeError("Cannot set language: neither ALTextToSpeech nor ALSpeechRecognition nor ALDialog is available.")
+            #self.onReady()
+        except:
+            error = "[Translate] Language %s cannot be set." % (lang)
+            self.logger.warn(error)
+
+    def onInput_onStart(self, text):
+
+        lang = self.getParameter("Language")
+        self.setLanguage(lang)
+
+        # Google Cloud Translation API
+        import requests
+        from HTMLParser import HTMLParser
+        h = HTMLParser()
+
+        self.logger.info("[Translate] country-code : %s" % ( self.translateToCode(self.getParameter("Language"))));
+
+        try:
+            response = requests.post("https://translation.googleapis.com/language/translate/v2", data = {"key":self.getParameter("APIKey"), "q":text, "target":self.translateToCode(self.getParameter("Language"))})
+        except:
+            error = "[Translate] warn: check network connection."
+            self.logger.warn(error)
+            self.onError(error)
+
+        jsondata = json.loads(response.text)
+        #jsondata = HTMLParser.HTMLParser().unescape(jsondata)
+        data = jsondata["data"]["translations"][0]["translatedText"]
+        data = h.unescape(data)
+
+        self.tranlateData = data.encode("utf-8")
+        self.logger.info(self.tranlateData)
+        self.onStopped(self.tranlateData)
+
+    def onInput_onStop(self):
+        self.onUnload() #it is recommended to reuse the clean-up as the box is stopped
+        self.onStopped() #activate the output of the box
+
+    def translateToCode(self, country):
+        '''
+        言語をコード変換
+        '''
+        # ブラジルの公用語はポルトガル語 pt
+        # 中国語は簡体字だが、Pepperは繁体のみの対応していないため 中国語(繁体) zh-TW
+        # GC Translation APIは台湾語に対応しないため 中国語(繁体) zh-TW
+        countryDict = {'Arabic':'ar',
+        'Brazilian':'pt',
+        'Chinese':'zh-TW',
+        'Czech':'cs',
+        'Danish':'da',
+        'Dutch':'nl',
+        'English':'en',
+        'Finnish':'fi',
+        'French':'fr',
+        'German':'de',
+        'Greek':'el',
+        'Italian':'it',
+        'Japanese':'ja',
+        'Korean':'ko',
+        'MandarinTaiwan':'zh-TW',
+        'Norwegian':'no',
+        'Polish':'pl',
+        'Portuguese':'pt',
+        'Russian':'ru',
+        'Swedish':'sv',
+        'Turkish':'tr'
+        }
+        # 辞書に有効なものがあるか調べる
+        if(country in countryDict.keys()):
+            return countryDict[country]
+        else:
+            error = "[Translate] Language %s cannot be set." % (country)
+            self.logger.warn(error)
+            self.onError(error)]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="3" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="3" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Output name="onError" type="0" type_size="1" nature="2" inner="0" tooltip="" id="5" /><Parameter name="APIKey" inherits_from_parent="0" content_type="3" value="YOUR_API_KEY" default_value="" custom_choice="0" tooltip="" id="6" /><Parameter name="Language" inherits_from_parent="0" content_type="3" value="English" default_value="Turkish" custom_choice="0" tooltip="" id="7"><Choice value="Arabic" /><Choice value="Brazilian" /><Choice value="Chinese" /><Choice value="Czech" /><Choice value="Danish" /><Choice value="Dutch" /><Choice value="English" /><Choice value="Finnish" /><Choice value="French" /><Choice value="German" /><Choice value="Greek" /><Choice value="Italian" /><Choice value="Japanese" /><Choice value="Korean" /><Choice value="MandarinTaiwan" /><Choice value="Norwegian" /><Choice value="Polish" /><Choice value="Portuguese" /><Choice value="Russian" /><Choice value="Spanish" /><Choice value="Swedish" /><Choice value="Turkish" /></Parameter></Box><Box name="Text Edit" id="7" localization="8" tooltip="Send the text you entered when the input is stimulated." plugin="textedit_plugin" x="72" y="136"><bitmap>media/images/box/interaction/vocabulary.png</bitmap><script language="4"><content><![CDATA[# /!\ Generated content. Do not edit!
+class MyClass(GeneratedClass):
+	def __init__(self):
+		GeneratedClass.__init__(self)
+
+	def onInput_onStart(self):
+		self.onStopped("お疲れ様でした")]]></content></script><pluginContent><text><![CDATA[お疲れ様でした]]></text></pluginContent><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when Diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="1" inner="0" tooltip="To send the text on the output." id="2" /><Output name="onStopped" type="3" type_size="1" nature="2" inner="0" tooltip="The text you entered." id="3" /></Box><Box name="Say Text" id="8" localization="8" tooltip="Say the text received on its input." x="437" y="131"><bitmap>media/images/box/interaction/say.png</bitmap><script language="4"><content><![CDATA[import time
+
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self, False)
+        self.tts = ALProxy('ALTextToSpeech')
+        self.ttsStop = ALProxy('ALTextToSpeech', True) #Create another proxy as wait is blocking if audioout is remote
+
+    def onLoad(self):
+        self.bIsRunning = False
+        self.ids = []
+
+    def onUnload(self):
+        for id in self.ids:
+            try:
+                self.ttsStop.stop(id)
+            except:
+                pass
+        while( self.bIsRunning ):
+            time.sleep( 0.2 )
+
+    def onInput_onStart(self, p):
+        self.bIsRunning = True
+        try:
+            sentence = "\RSPD="+ str( self.getParameter("Speed (%)") ) + "\ "
+            sentence += "\VCT="+ str( self.getParameter("Voice shaping (%)") ) + "\ "
+            sentence += str(p)
+            sentence +=  "\RST\ "
+            id = self.tts.post.say(str(sentence))
+            self.ids.append(id)
+            self.tts.wait(id, 0)
+        finally:
+            try:
+                self.ids.remove(id)
+            except:
+                pass
+            if( self.ids == [] ):
+                self.onStopped() # activate output of the box
+                self.bIsRunning = False
+
+    def onInput_onStop(self):
+        self.onUnload()]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when Diagram is loaded." id="1" /><Input name="onStart" type="3" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this Input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this Input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when Box behavior is finished." id="4" /><Parameter name="Voice shaping (%)" inherits_from_parent="1" content_type="1" value="130" default_value="100" min="50" max="150" tooltip='Used to modify at runtime the voice feature (tone, speed). In a slighty&#x0A;different way than pitch and speed, it gives a kind of &quot;gender or age&#x0A;modification&quot; effect.&#x0A;&#x0A;For instance, a quite good male derivation of female voice can be&#x0A;obtained setting this parameter to 78%.&#x0A;&#x0A;Note: For a better effect, you can compensate this parameter with the&#x0A;speed parameter. For example, if you want to decrease by 20% the voice&#x0A;shaping, you will have to increase by 20% the speed to keep a constant&#x0A;average speed.' id="5" /><Parameter name="Speed (%)" inherits_from_parent="1" content_type="1" value="110" default_value="100" min="50" max="200" tooltip="Changes the speed of the voice.&#x0A;&#x0A;Note: For a better effect, you can compensate this parameter with the voice&#x0A;shaping parameter. For example, if you want to increase by 20% the speed, you&#x0A;will have to decrease by 20% the voice shaping to keep a constant average&#x0A;speed." id="6" /><Resource name="Speech" type="Lock" timeout="0" /></Box><Box name="SetPathLibFld" id="1" localization="8" tooltip="プロジェクトの Lib フォルダーに Python パスを通す" x="67" y="28"><bitmap>media/images/box/box-python-script.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        self.pathModified = False
+
+    def onUnload(self):
+        if self.pathModified and self.folderName and self.folderName in sys.path:
+            sys.path.remove(self.folderName)
+        self.folderName = None
+
+    def onInput_onStart(self):
+        appFolder = self.behaviorAbsolutePath().replace(self.behaviorRelativePath(), "")
+        self.folderName = os.path.join(appFolder, "lib")
+        if self.folderName not in sys.path:
+            sys.path.append(self.folderName)
+            self.pathModified = True
+
+        self.onReady()
+
+    def onInput_onStop(self):
+        self.onUnload() #it is recommended to reuse the clean-up as the box is stopped
+        self.onStopped() #activate the output of the box]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Output name="onReady" type="1" type_size="1" nature="2" inner="0" tooltip="" id="5" /></Box><Link inputowner="8" indexofinput="2" outputowner="6" indexofoutput="4" /><Link inputowner="0" indexofinput="4" outputowner="8" indexofoutput="4" /><Link inputowner="6" indexofinput="2" outputowner="7" indexofoutput="3" /><Link inputowner="1" indexofinput="2" outputowner="0" indexofoutput="2" /><Link inputowner="7" indexofinput="2" outputowner="1" indexofoutput="5" /></Diagram></BehaviorKeyframe></BehaviorLayer></Timeline></Box></ChoregrapheProject>

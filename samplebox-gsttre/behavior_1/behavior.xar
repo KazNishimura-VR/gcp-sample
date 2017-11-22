@@ -1,0 +1,468 @@
+<?xml version="1.0" encoding="UTF-8" ?><ChoregrapheProject xmlns="http://www.aldebaran-robotics.com/schema/choregraphe/project.xsd" xar_version="3"><Box name="root" id="-1" localization="8" tooltip="Root box of Choregraphe&apos;s behavior. Highest level possible." x="0" y="0"><bitmap>media/images/box/root.png</bitmap><script language="4"><content><![CDATA[]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Input name="FrontTactilTouched" type="0" type_size="1" nature="4" stm_value_name="FrontTactilTouched" inner="1" tooltip="FrontTactilTouched desc" id="4" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="ボックスBehaviorの終了時に信号を送る。" id="5" /><Timeline enable="0"><BehaviorLayer name="behavior_layer1"><BehaviorKeyframe name="keyframe1" index="1"><Diagram><Box name="GoogleSTT" id="4" localization="8" tooltip="This box is empty and should be used to create any box diagram you would like.&#x0A;&#x0A;To edit its diagram, double-click on it." x="110" y="122"><bitmap>media/images/box/interaction/ear.png</bitmap><script language="4"><content><![CDATA[]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="3" type_size="1" nature="2" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Parameter name="GoogleSTTKey" inherits_from_parent="0" content_type="4" value="../key.json" default_value="" tooltip="" id="5" /><Parameter name="Timeout" inherits_from_parent="0" content_type="1" value="15" default_value="0" min="0" max="100" tooltip="" id="6" /><Timeline enable="0"><BehaviorLayer name="behavior_layer1"><BehaviorKeyframe name="keyframe1" index="1"><Diagram scale="100"><Box name="Recorder" id="5" localization="8" tooltip="Stimulate output repeatedly with the specified interval.&#x0A;Can be stopped anytime. &#x0A;Stimulating the input again restarts the timer.&#x0A;" x="111" y="72"><bitmap>media/images/box/interaction/rec_sound.png</bitmap><script language="4"><content><![CDATA[import os
+import time
+import threading
+from datetime import datetime
+
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self, False)
+        self.recoder = ALProxy("ALAudioRecorder")
+        self.memory = ALProxy("ALMemory")
+        self.player = ALProxy("ALAudioPlayer")
+        self.leds = ALProxy("ALLeds")
+        self.appFolder = ''
+        self.recPath = ''
+
+    def onLoad(self):
+        self.timer = None
+        # 状態管理用フラグの初期化
+        self.memory.insertData("rec-expantion", 0)
+        self.memory.insertData("rec-active", 0)
+        self.memory.insertData("rec-mode", 0)
+        self.memory.insertData("active-mic-front", 0)
+        self.memory.insertData("active-mic-right", 0)
+        self.memory.insertData("active-mic-left", 0)
+
+        if os.path.exists('/tmp/recordings/microphones/') is False:
+            os.makedirs("/tmp/recordings/microphones/")
+        self.recPath = "/tmp/recordings/microphones/temp.wav"
+
+    def onUnload(self):
+        self.cancelTimer()
+        # 録音ファイルを削除する
+        if (os.path.exists(self.recPath)):
+            self.logger.info("[STT Info]: 録音ファイル削除" + self.recPath)
+            os.remove(self.recPath)
+
+    def getTimeStamp(self):
+        '''
+        タイムスタンプ取得
+        '''
+        return datetime.now().strftime('%H:%M:%S').encode('utf-8')
+
+    def cancelTimer(self):
+        if self.timer:
+            self.timer.stop()
+        self.timer = None
+
+    def onTimer(self):
+        '''
+        録音タイマー
+        '''
+        self.getTimeStamp()
+        # 録音していない場合
+        if(self.memory.getData("rec-mode") == 0):
+            self.logger.info("[STT Info]: 録音開始 %s" % self.getTimeStamp())
+            self.startRecoder()
+        # 録音中の場合
+        else:
+            # 延長フラグがない場合
+            if (self.memory.getData("rec-expantion") == 0):
+
+                if (self.memory.getData("rec-active") == 1):
+                    self.logger.info("[STT Info]: 録音終了 %s" % self.getTimeStamp())
+                    self.logger.info("[STT Info]: 送信開始 %s" % self.getTimeStamp())
+                    self.memory.insertData("rec-active", 0)
+                    self.timerOutput(self.recPath)
+                    self.stopRecoder()
+                    self.onInput_onStop()
+                else:
+                    self.stopRecoder()
+                    self.logger.info("[STT Info]: ドロップ %s" % self.getTimeStamp())
+                    self.startRecoder() # キャンセル時の起動
+            # 延長フラグがある場合
+            else:
+                self.memory.insertData("rec-expantion", 0)
+
+    def startRecoder(self):
+        '''
+        録音開始
+        '''
+        self.memory.insertData("rec-mode", 1)
+
+        if self.memory.getData("active-mic-right") == 1 and self.memory.getData("active-mic-left") == 0:
+            self.recoder.startMicrophonesRecording(self.recPath, "wav", 16000, [0,1,0,0])
+        elif self.memory.getData("active-mic-right") == 0 and self.memory.getData("active-mic-left") == 1:
+            self.recoder.startMicrophonesRecording(self.recPath, "wav", 16000, [1,0,0,0])
+        else:
+            self.recoder.startMicrophonesRecording(self.recPath, "wav", 16000, [0,0,1,0])
+        id = self.leds.post.fadeRGB("FaceLeds", 0xffffff, 0)
+
+    def stopRecoder(self):
+        '''
+        録音停止
+        '''
+        self.memory.insertData("rec-mode", 0)
+        self.memory.insertData("active-mic-front", 0)
+        self.memory.insertData("active-mic-right", 0)
+        self.memory.insertData("active-mic-left", 0)
+        self.recoder.stopMicrophonesRecording()
+
+    def startTimer(self):
+        import qi
+        self.timer = qi.PeriodicTask()
+        self.timer.setCallback(self.onTimer)
+        self.timer.setUsPeriod(int(self.getParameter("Period (s)") * 1000 * 1000))
+        self.timer.start(True)
+
+    def onInput_onStart(self):
+        self.cancelTimer()
+
+        # ポコ音の再生
+        #self.appFolder = self.behaviorAbsolutePath().replace(self.behaviorRelativePath(), "")
+        #self.player.playFile(os.path.join(self.appFolder, 'begin_reco.ogg'))
+        time.sleep(1.0)
+
+        self.memory.insertData("rec-active", 0)
+#
+        self.startTimer()
+
+    def onInput_onRecognized(self):
+        '''
+        Reco による停止
+        '''
+        self.logger.info("[STT Info]: 録音終了 %s" % self.getTimeStamp())
+        self.logger.info("[STT Info]: 送信開始 %s" % self.getTimeStamp())
+        self.memory.insertData("rec-active", 0)
+        #self.logger.info("■■■" + self.recPath)
+        self.stopRecoder()
+        self.timerOutput(self.recPath)
+        self.onInput_onStop()
+
+    def onInput_onStop(self):
+        if self.timer and self.timer.isRunning():
+            self.onStopped()
+        #self.onUnload()]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Start the timer using the configured period value." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Stop the timer." id="3" /><Input name="onRecognized" type="1" type_size="1" nature="1" inner="0" tooltip="" id="4" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when the box is stopped." id="5" /><Output name="timerOutput" type="3" type_size="1" nature="2" inner="0" tooltip="Send a bang periodically." id="6" /><Parameter name="Period (s)" inherits_from_parent="0" content_type="2" value="20" default_value="1" min="0" max="5000" tooltip="Defines the period of the timer box (in seconds).&#x0A;&#x0A;For example, if this parameter is equal to 1s, the timerOutput will be stimulated&#x0A;every second until the onStop input is stimulated." id="7" /></Box><Box name="Mic Monitor" id="1" localization="8" tooltip="This box contains a basic python script and can be used to create any python script box you would like.&#x0A;&#x0A;To edit its script, double-click on it." x="256" y="24"><bitmap>media/images/box/box-python-script.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+        self.ad = ALProxy("ALAudioDevice")
+        self.memory = ALProxy("ALMemory")
+        self.checkFlag = True
+
+    def onLoad(self):
+        #put initialization code here
+        pass
+
+    def onUnload(self):
+        #put clean-up code here
+        self.checkFlag = False
+
+    def onInput_onStart(self):
+        '''
+        マイクの入力レベルを確認する
+        '''
+
+        self.checkFlag = True
+        self.threshold = 2000 # 閾値
+        updateCounter = 0
+
+        # polling開始
+        while self.checkFlag:
+            eng = {"front":0, "right":0, "left":0}
+            eng["front"] = self.ad.getFrontMicEnergy()
+            eng["right"] = self.ad.getRightMicEnergy()
+            eng["left"] = self.ad.getLeftMicEnergy()
+            eng_sort = sorted(eng.items(), key=lambda x: x[1])
+
+            # レベルが閾値を超える
+            if (self.threshold <= eng_sort[2][1]):
+                #self.logger.info("■■■ mic level over")
+                self.memory.insertData("rec-expantion", 1)
+                self.memory.insertData("rec-active", 1)
+                self.memory.insertData("active-mic-"+eng_sort[2][0],1)
+                pass
+
+            elif (eng_sort[2][1] < self.threshold):
+                #self.logger.info("■■■ mic level under")
+                self.memory.insertData("rec-expantion", 0)
+                pass
+
+            # 閾値の更新
+            if(updateCounter == 50):
+                updateCounter = 0
+                self.updateThreshold(eng)
+
+            time.sleep(.1)
+
+    def updateThreshold(self, eng):
+        '''
+        閾値を更新する
+        '''
+        self.threshold = ((self.threshold + eng) / 2) + 1000
+        self.logger.info('now: ' + str(int(eng)) + ' th: ' + str(int(self.threshold)))
+
+    def onInput_onStop(self):
+        self.onUnload() #it is recommended to reuse the clean-up as the box is stopped
+        self.onStopped() #activate the output of the box]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /></Box><Box name="GSTT V1Beta" id="4" localization="8" tooltip="" x="109" y="184"><bitmap>media/images/box/box-python-script.png</bitmap><script language="4"><content><![CDATA[import json
+import os
+import time
+from datetime import datetime
+
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+        self.discovery_url = ('https://{api}.googleapis.com/$discovery/rest?'
+            'version={apiVersion}')
+
+    def onLoad(self):
+        self.memory = ALProxy("ALMemory")
+        self.framemanager = ALProxy("ALFrameManager")
+        self.leds = ALProxy("ALLeds")
+
+    def onUnload(self):
+        self.framemanager = None
+        if os.environ.has_key("GOOGLE_APPLICATION_CREDENTIALS"):
+            os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS")
+
+    def getTimeStamp(self):
+        '''
+        タイムスタンプ取得
+        '''
+        return datetime.now().strftime('%H:%M:%S').encode('utf-8')
+
+    def onInput_onStart(self, filename):
+        '''
+        音声認識開始
+        '''
+        # APIキーの反映
+        keyPath = os.path.join(self.framemanager.getBehaviorPath(self.behaviorId), self.getParameter("GoogleSTTKey"))
+        if (not os.path.exists(keyPath)):
+            self.leds.post.fadeRGB("RightFaceLeds", 0xff0000, 0)
+            return
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = keyPath
+
+        # Google Speech APIで音声認識開始
+        self.leds.post.fadeRGB("FaceLeds", 0x00ff00, 0)
+        res = self.startSpeechRecognition(filename)
+        results = json.loads(res)
+        self.logger.info(results)
+
+        try:
+            # レスポンス結果が空の場合は認識できなかったとする
+            if len(results) == 0:
+                self.logger.info("[STT Info]: 認識失敗 %s" % self.getTimeStamp())
+                self.leds.post.fadeRGB("FaceLeds", 0x0000ff, 0)
+                self.NonRecognition(filename)
+            else:
+                # 内容を確認する
+                if('alternatives' in results['results'][0]):
+                    speech_reco = results['results'][0]['alternatives'][0]['transcript']
+                    self.leds.post.fadeRGB("FaceLeds", 0xffffff, 0)
+                    self.logger.info("[STT Info]: 認識成功 %s" % self.getTimeStamp())
+                    self.logger.info("[STT Info]: 認識結果： " + speech_reco.encode("utf-8"))
+                    self.Recognition(speech_reco.encode('utf-8'))
+                # エラー
+                else:
+                    self.leds.post.fadeRGB("LeftFaceLeds", 0xff0000, 0)
+                    self.NonRecognition(filename)
+        except Exception as e:
+            self.leds.post.fadeRGB("LeftFaceLeds", 0xffff00, 0)
+            self.NonRecognition(filename)
+
+    def encodeAudio(self, audio):
+        '''
+        エンコード処理
+        '''
+        import base64
+        audio_content = audio.read()
+        return base64.b64encode(audio_content)
+
+    def getSpeechService(self):
+        from googleapiclient import discovery
+        import httplib2
+        from oauth2client.client import GoogleCredentials
+
+        credentials = GoogleCredentials.get_application_default().create_scoped(['https://www.googleapis.com/auth/cloud-platform'])
+        http = httplib2.Http()
+        credentials.authorize(http)
+
+        return discovery.build('speech', 'v1beta1', http = http, discoveryServiceUrl = self.discovery_url)
+
+    def startSpeechRecognition(self, sound_file):
+        '''
+        音声認識開始
+        '''
+
+        try:
+            with open(sound_file, 'rb') as sound:
+                sound_content = self.encodeAudio(sound)
+            service = self.getSpeechService()
+            service_request = service.speech().syncrecognize(
+                body = {
+                    'config': {
+                        'encoding': 'LINEAR16',
+                        'sampleRate': 16000,
+                        'languageCode': 'ja-JP',
+                    },
+                    'audio': {
+                        'content': sound_content.decode('utf-8')
+                        }
+                    })
+            res_json = service_request.execute()
+        except Exception as e:
+            res_json = {'results': str(e)}
+
+        return json.dumps(res_json)
+
+    def onInput_onStop(self):
+        self.onUnload()
+        self.onStopped()]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="3" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="Recognition" type="3" type_size="1" nature="1" inner="0" tooltip="ボックス動作の終了時に信号を送る。" id="4" /><Output name="NonRecognition" type="3" type_size="1" nature="1" inner="0" tooltip="" id="5" /><Parameter name="Timeout" inherits_from_parent="1" content_type="1" value="15" default_value="10" min="1" max="3600" tooltip="" id="6" /><Parameter name="GoogleSTTKey" inherits_from_parent="1" content_type="4" value="" default_value="" tooltip="" id="7" /></Box><Box name="Timeout" id="6" localization="8" tooltip="Wait a moment before sending a signal on the output. &#x0A;Can be stopped anytime. &#x0A;Stimulating the input again before output is activated restarts the waiting period.&#x0A;" x="110" y="292"><bitmap>media/images/box/wait.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self, False)
+
+    def onLoad(self):
+        self.waiting = None
+        self.leds = ALProxy("ALLeds")
+
+    def onUnload(self):
+        self.cancelWaiting()
+
+    def triggerOutput(self):
+        id = self.leds.post.fadeRGB("RightFaceLeds", 0xff00ff, 0)
+        self.timerOutput()
+
+    def cancelWaiting(self):
+        if self.waiting:
+            self.waiting.cancel()
+        self.waiting = None
+
+    def onInput_onStart(self):
+        self.cancelWaiting()
+        import qi
+        self.waiting = qi.async(self.triggerOutput, delay=int(self.getParameter("Timeout (s)") * 1000 * 1000))
+
+    def onInput_onStop(self):
+        if self.getParameter("Trigger timerOutput if cancelled") and self.waiting and self.waiting.isRunning():
+            self.timerOutput()
+        self.onUnload()]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Start the Wait box with the configured timeout value." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Stop the wait and stimulate the output." id="3" /><Output name="timerOutput" type="1" type_size="1" nature="1" inner="0" tooltip="Send a bang once time set in parameters is elapsed, or if the box is stopped and the appropriate parameter is set." id="4" /><Parameter name="Timeout (s)" inherits_from_parent="0" content_type="2" value="20" default_value="1" min="0" max="5000" tooltip="Duration the box waits before stimulating the output." id="5" /><Parameter name="Trigger timerOutput if cancelled" inherits_from_parent="0" content_type="0" value="0" default_value="1" tooltip="If the box is currently waiting and cancelled, output will be stimulated." id="6" /></Box><Box name="RecoFeedback" id="2" localization="8" tooltip="Recognize a word from a list of words set in the box parameters.&#x0A;&#x0A;V1.1.0&#x0A;" x="108" y="401"><bitmap>media/images/box/interaction/ear.png</bitmap><script language="4"><content><![CDATA[import time
+
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self, False)
+        try:
+            self.asr = ALProxy("ALSpeechRecognition")
+        except Exception as e:
+            self.asr = None
+            self.logger.error(e)
+        self.memory = ALProxy("ALMemory")
+        self.leds = ALProxy("ALLeds")
+
+    def onLoad(self):
+        from threading import Lock
+        self.bIsRunning = False
+        self.mutex = Lock()
+        self.hasPushed = False
+        self.hasSubscribed = False
+        self.BIND_PYTHON(self.getName(), "onWordRecognized")
+
+    def onUnload(self):
+        from threading import Lock
+        self.mutex.acquire()
+        try:
+            if (self.bIsRunning):
+                if (self.hasSubscribed):
+                    self.memory.unsubscribeToEvent("WordRecognized", self.getName())
+                if (self.hasPushed and self.asr):
+                    self.asr.popContexts()
+        except RuntimeError, e:
+            self.mutex.release()
+            raise e
+        self.bIsRunning = False;
+        self.mutex.release()
+
+    def onInput_onStart(self):
+        from threading import Lock
+
+        self.mutex.acquire()
+        if(self.bIsRunning):
+            self.mutex.release()
+            return
+        self.bIsRunning = True
+        try:
+            if self.asr:
+                self.asr.setVisualExpression(self.getParameter("Visual expression"))
+                self.asr.pushContexts()
+            self.hasPushed = True
+            if self.asr:
+                self.asr.setVocabulary("/".split(';'), 0)
+            self.memory.subscribeToEvent("WordRecognized", self.getName(), "onWordRecognized")
+            self.hasSubscribed = True
+        except RuntimeError, e:
+            self.mutex.release()
+            self.onUnload()
+            self.logger.info(e)
+            self.leds.post.fadeRGB("FaceLeds", 0xff0000, 1.0)
+            self.leds.post.fade("EarLeds", 0, 1.0)
+
+            raise e
+        self.mutex.release()
+
+    def onWordRecognized(self, key, value, message):
+        self.asr.setVisualExpression(0) # 意図的にOFFにする
+        self.onUnload()
+        self.onStopRecording()]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Output name="onStopRecording" type="1" type_size="1" nature="1" inner="0" tooltip="Word recognized with a confidence higher than the threshold set in the box parameters." id="3" /><Output name="onError" type="3" type_size="1" nature="2" inner="0" tooltip="" id="4" /><Parameter name="Confidence threshold (%)" inherits_from_parent="0" content_type="1" value="30" default_value="30" min="0" max="100" tooltip="If the confidence associated with the word recognized is below this threshold, the robot will consider that it is not recognized." id="5" /><Parameter name="Visual expression" inherits_from_parent="0" content_type="0" value="1" default_value="1" tooltip="Use the LEDs to show feedbacks from the robot during the recognition.&#x0A;&#x0A;For example:&#x0A;- Eyes leds get blue and turn when the speech recognition is launched.&#x0A;- They get yellow when the robot hears someone talking and analyses what it heard.&#x0A;- They flash in green when the robot understood and flash in red otherwise." id="6" /><Resource name="Speech recognition" type="Lock" timeout="-1" /></Box><Link inputowner="5" indexofinput="2" outputowner="0" indexofoutput="2" /><Link inputowner="1" indexofinput="2" outputowner="0" indexofoutput="2" /><Link inputowner="0" indexofinput="4" outputowner="4" indexofoutput="4" /><Link inputowner="5" indexofinput="2" outputowner="4" indexofoutput="5" /><Link inputowner="4" indexofinput="2" outputowner="5" indexofoutput="6" /><Link inputowner="6" indexofinput="2" outputowner="5" indexofoutput="6" /><Link inputowner="5" indexofinput="2" outputowner="6" indexofoutput="4" /><Link inputowner="6" indexofinput="3" outputowner="4" indexofoutput="4" /><Link inputowner="2" indexofinput="2" outputowner="0" indexofoutput="2" /><Link inputowner="5" indexofinput="4" outputowner="2" indexofoutput="3" /><Link inputowner="2" indexofinput="2" outputowner="4" indexofoutput="5" /></Diagram></BehaviorKeyframe></BehaviorLayer></Timeline></Box><Box name="SetPathLibFld" id="5" localization="8" tooltip="プロジェクトの Lib フォルダーに Python パスを通す" x="109" y="16"><bitmap>media/images/box/box-python-script.png</bitmap><script language="4"><content><![CDATA[class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self)
+
+    def onLoad(self):
+        self.pathModified = False
+
+    def onUnload(self):
+        if self.pathModified and self.folderName and self.folderName in sys.path:
+            sys.path.remove(self.folderName)
+        self.folderName = None
+
+    def onInput_onStart(self):
+        appFolder = self.behaviorAbsolutePath().replace(self.behaviorRelativePath(), "")
+        self.folderName = os.path.join(appFolder, "lib")
+        if self.folderName not in sys.path:
+            sys.path.insert(0, self.folderName)
+            self.pathModified = True
+
+        self.onReady()
+
+    def onInput_onStop(self):
+        self.onUnload() #it is recommended to reuse the clean-up as the box is stopped
+        self.onStopped() #activate the output of the box]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when diagram is loaded." id="1" /><Input name="onStart" type="1" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when box behavior is finished." id="4" /><Output name="onReady" type="1" type_size="1" nature="2" inner="0" tooltip="" id="5" /></Box><Box name="Animated Say Text" id="1" localization="8" tooltip="Say the text received on its input and move during its speech.&#x0A;" x="114" y="232"><bitmap>media/images/box/interaction/say.png</bitmap><script language="4"><content><![CDATA[import time
+
+class MyClass(GeneratedClass):
+    def __init__(self):
+        GeneratedClass.__init__(self, False)
+        self.tts = ALProxy('ALAnimatedSpeech')
+        self.ttsStop = ALProxy('ALAnimatedSpeech', True) #Create another proxy as wait is blocking if audioout is remote
+
+    def onLoad(self):
+        self.bIsRunning = False
+        self.ids = []
+
+    def onUnload(self):
+        for id in self.ids:
+            try:
+                self.ttsStop.stop(id)
+            except:
+                pass
+        while( self.bIsRunning ):
+            time.sleep( 0.2 )
+
+    def onInput_onStart(self, p):
+        self.bIsRunning = True
+        try:
+            movement = self.getParameter("Speaking movement mode")
+            sentence = "\RSPD="+ str( self.getParameter("Speed (%)") ) + "\ "
+            sentence += "\VCT="+ str( self.getParameter("Voice shaping (%)") ) + "\ "
+            sentence += str(p)
+            sentence +=  "\RST\ "
+            id = self.tts.post.say(str(sentence), {"speakingMovementMode":movement})
+            self.ids.append(id)
+            self.tts.wait(id, 0)
+        finally:
+            try:
+                self.ids.remove(id)
+            except:
+                pass
+            if( self.ids == [] ):
+                self.onStopped() # activate output of the box
+                self.bIsRunning = False
+
+    def onInput_onStop(self):
+        self.onUnload()]]></content></script><Input name="onLoad" type="1" type_size="1" nature="0" inner="1" tooltip="Signal sent when Diagram is loaded." id="1" /><Input name="onStart" type="3" type_size="1" nature="2" inner="0" tooltip="Box behavior starts when a signal is received on this Input." id="2" /><Input name="onStop" type="1" type_size="1" nature="3" inner="0" tooltip="Box behavior stops when a signal is received on this Input." id="3" /><Output name="onStopped" type="1" type_size="1" nature="1" inner="0" tooltip="Signal sent when Box behavior is finished." id="4" /><Parameter name="Voice shaping (%)" inherits_from_parent="1" content_type="1" value="136" default_value="100" min="50" max="150" tooltip='Used to modify at runtime the voice feature (tone, speed). In a slighty&#x0A;different way than pitch and speed, it gives a kind of &quot;gender or age&#x0A;modification&quot; effect.&#x0A;&#x0A;For instance, a quite good male derivation of female voice can be&#x0A;obtained setting this parameter to 78%.&#x0A;&#x0A;Note: For a better effect, you can compensate this parameter with the&#x0A;speed parameter. For example, if you want to decrease by 20% the voice&#x0A;shaping, you will have to increase by 20% the speed to keep a constant&#x0A;average speed.' id="5" /><Parameter name="Speed (%)" inherits_from_parent="1" content_type="1" value="100" default_value="100" min="50" max="200" tooltip="Changes the speed of the voice.&#x0A;&#x0A;Note: For a better effect, you can compensate this parameter with the voice&#x0A;shaping parameter. For example, if you want to increase by 20% the speed, you&#x0A;will have to decrease by 20% the voice shaping to keep a constant average&#x0A;speed." id="6" /><Parameter name="Speaking movement mode" inherits_from_parent="0" content_type="3" value="random" default_value="contextual" custom_choice="0" tooltip="Change the body language mode during the speech.&#x0A;disabled: The robot will only play the animations given by the user through the animation parameter.&#x0A;random: During time the robot has no animation to play, he will launch random neutral animations.&#x0A;contextual: During time the robot has no animation to play, he will try to launch a new one accordingly to the saying text. Every time the robot can&apos;t find a contextual animation he will launch a random neutral animation." id="7"><Choice value="disabled" /><Choice value="random" /><Choice value="contextual" /></Parameter></Box><Link inputowner="0" indexofinput="5" outputowner="0" indexofoutput="4" /><Link inputowner="5" indexofinput="2" outputowner="0" indexofoutput="2" /><Link inputowner="4" indexofinput="2" outputowner="5" indexofoutput="5" /><Link inputowner="1" indexofinput="2" outputowner="4" indexofoutput="4" /><Link inputowner="4" indexofinput="2" outputowner="1" indexofoutput="4" /></Diagram></BehaviorKeyframe></BehaviorLayer></Timeline></Box></ChoregrapheProject>

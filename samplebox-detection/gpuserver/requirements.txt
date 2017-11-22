@@ -1,0 +1,7 @@
+tensorflow
+google-api-python-client
+google-cloud-storage
+opencv-python
+numpy
+Flask
+
